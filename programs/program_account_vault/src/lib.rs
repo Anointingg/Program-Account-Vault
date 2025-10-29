@@ -14,12 +14,7 @@ pub mod program_account_vault {
     }
 
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
-        // check if deposit has enough for rent too
-        require_gt!(
-            amount,
-            Rent::get()?.minimum_balance(0),
-            VaultError::InvalidAmount
-        );
+        require_gt!(amount, 0u64, VaultError::InvalidAmount);
 
         transfer(
             CpiContext::new(
@@ -33,9 +28,18 @@ pub mod program_account_vault {
         )?;
 
         let vault = &mut ctx.accounts.vault;
-        vault.owner = ctx.accounts.signer.key();
+
+        if vault.owner == Pubkey::default() {
+            vault.owner = ctx.accounts.signer.key();
+            vault.bump = ctx.bumps.vault;
+        } else {
+            require_keys_eq!(
+                vault.owner,
+                ctx.accounts.signer.key(),
+                VaultError::InvalidOwner
+            );
+        }
         vault.balance = vault.balance.saturating_add(amount);
-        vault.bump = ctx.bumps.vault;
 
         Ok(())
     }
@@ -79,6 +83,8 @@ pub struct Vault {
     bump: u8,
 }
 
+pub const VAULT_SPACE: usize = 8 + 32 + 8 + 1 + 8; // discriminator + owner + balance + bump + padding
+
 #[derive(Accounts)]
 
 pub struct Deposit<'info> {
@@ -88,7 +94,7 @@ pub struct Deposit<'info> {
     #[account(
         init, // I believe init_if_needed is a more appropriate approach here.
         payer = signer,
-        space = 8 + 6 + 32 + 6,
+        space = VAULT_SPACE,
         seeds = [b"vault", signer.key().as_ref()],
         bump
     )]
@@ -106,7 +112,8 @@ pub struct Withdraw<'info> {
         mut,
         has_one = owner,
         seeds = [b"vault", owner.key().as_ref()],
-        bump = vault.bump
+        bump = vault.bump,
+        close = owner,
     )]
     vault: Account<'info, Vault>,
 
@@ -120,4 +127,7 @@ pub enum VaultError {
 
     #[msg("insufficient balance")]
     InsufficientBalance,
+
+    #[msg("invalid owner")]
+    InvalidOwner,
 }
