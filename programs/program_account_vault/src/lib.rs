@@ -39,6 +39,34 @@ pub mod program_account_vault {
 
         Ok(())
     }
+
+    pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
+        require_gte!(
+            ctx.accounts.vault.balance,
+            amount,
+            VaultError::InsufficientBalance
+        );
+
+        let owner = ctx.accounts.owner.key();
+        let owner_seed = [b"vault", owner.as_ref(), &[ctx.accounts.vault.bump]];
+
+        transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.vault.to_account_info(),
+                    to: ctx.accounts.owner.to_account_info(),
+                },
+                &[&owner_seed[..]],
+            ),
+            amount,
+        )?;
+
+        let vault = &mut ctx.accounts.vault;
+        vault.balance = vault.balance.saturating_sub(amount);
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -89,4 +117,7 @@ pub struct Withdraw<'info> {
 pub enum VaultError {
     #[msg("invalid amount")]
     InvalidAmount,
+
+    #[msg("insufficient balance")]
+    InsufficientBalance,
 }
