@@ -10,6 +10,15 @@ pub mod program_account_vault {
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         msg!("Greetings from: {:?}", ctx.program_id);
+
+        let vault = &mut ctx.accounts.vault;
+
+        vault.owner = ctx.accounts.signer.key();
+        vault.balance = 0;
+        vault.bump = ctx.bumps.vault;
+
+        msg!("Vault initialized for: {:?}", vault.owner);
+
         Ok(())
     }
 
@@ -20,7 +29,7 @@ pub mod program_account_vault {
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
                 Transfer {
-                    from: ctx.accounts.signer.to_account_info(),
+                    from: ctx.accounts.owner.to_account_info(),
                     to: ctx.accounts.vault.to_account_info(),
                 },
             ),
@@ -28,17 +37,6 @@ pub mod program_account_vault {
         )?;
 
         let vault = &mut ctx.accounts.vault;
-
-        if vault.owner == Pubkey::default() {
-            vault.owner = ctx.accounts.signer.key();
-            vault.bump = ctx.bumps.vault;
-        } else {
-            require_keys_eq!(
-                vault.owner,
-                ctx.accounts.signer.key(),
-                VaultError::InvalidOwner
-            );
-        }
         vault.balance = vault.balance.saturating_add(amount);
 
         Ok(())
@@ -73,8 +71,7 @@ pub mod program_account_vault {
     }
 }
 
-#[derive(Accounts)]
-pub struct Initialize {}
+pub const VAULT_SPACE: usize = 8 + 32 + 8 + 1 + 8; // discriminator + owner + balance + bump + padding
 
 #[account]
 pub struct Vault {
@@ -83,19 +80,33 @@ pub struct Vault {
     bump: u8,
 }
 
-pub const VAULT_SPACE: usize = 8 + 32 + 8 + 1 + 8; // discriminator + owner + balance + bump + padding
+#[derive(Accounts)]
+pub struct Initialize<'info> {
+    #[account(mut)]
+    signer: Signer<'info>,
+
+    #[account(
+        init,
+        payer = signer,
+        space = VAULT_SPACE,
+        seeds = [b"vault", signer.key().as_ref()],
+        bump
+    )]
+    vault: Account<'info, Vault>,
+
+    system_program: Program<'info, System>,
+}
 
 #[derive(Accounts)]
 
 pub struct Deposit<'info> {
     #[account(mut)]
-    signer: Signer<'info>,
+    owner: Signer<'info>,
 
     #[account(
-        init, // I believe init_if_needed is a more appropriate approach here.
-        payer = signer,
-        space = VAULT_SPACE,
-        seeds = [b"vault", signer.key().as_ref()],
+        mut,
+        has_one = owner,
+        seeds = [b"vault", owner.key().as_ref()],
         bump
     )]
     vault: Account<'info, Vault>,
